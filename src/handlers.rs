@@ -1,4 +1,4 @@
-
+use crate::structs::{CreateTask, CreateUser, Db, Task, UpdateTodo, User};
 use argon2::{
     Argon2,
     password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
@@ -9,9 +9,11 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use crate::structs::{CreateTask, CreateUser, Db, Task, UpdateTodo, User};
 
-pub async fn create_user(State(db): State<Db>, Json(payload): Json<CreateUser>) -> impl IntoResponse {
+pub async fn create_user(
+    State(db): State<Db>,
+    Json(payload): Json<CreateUser>,
+) -> impl IntoResponse {
     let mut data = db.lock().unwrap();
 
     let new_id = data.users.iter().map(|x| x.id + 1).max().unwrap_or(1);
@@ -44,7 +46,10 @@ pub async fn get_todos(State(db): State<Db>) -> impl IntoResponse {
     Json(serde_json::json!({ "tasks": &data.tasks}))
 }
 
-pub async fn post_todos(State(db): State<Db>, Json(payload): Json<CreateTask>) -> impl IntoResponse {
+pub async fn post_todos(
+    State(db): State<Db>,
+    Json(payload): Json<CreateTask>,
+) -> impl IntoResponse {
     let mut data = db.lock().expect("Locking failed.");
 
     let task_id = data.tasks.iter().map(|n| n.id + 1).max().unwrap_or(1);
@@ -88,13 +93,13 @@ pub async fn put_todos(
 
         return (
             StatusCode::OK,
-            Json(serde_json::json!({"msg": "Task updated", "task": task}))
+            Json(serde_json::json!({"msg": "Task updated", "task": task})),
         );
     }
 
     (
         StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"msg": "Task not found"}))
+        Json(serde_json::json!({"msg": "Task not found"})),
     )
 }
 
@@ -105,11 +110,11 @@ pub async fn delete_todos(Path(id): Path<usize>, State(db): State<Db>) -> impl I
         let removed_task = data.tasks.remove(pos);
         return (
             StatusCode::OK,
-            Json(serde_json::json!({"msg": "Task deleted", "task": removed_task}))
+            Json(serde_json::json!({"msg": "Task deleted", "task": removed_task})),
         );
     }
     (
         StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"msg": "Task not found"}))
+        Json(serde_json::json!({"msg": "Task not found"})),
     )
 }
