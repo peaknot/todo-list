@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust Todo App</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+        .hidden { display: none; }
+        input { padding: 8px; margin-right: 5px; }
+        button { padding: 8px 16px; cursor: pointer; }
+        li { margin: 10px 0; padding: 10px; background: #f4f4f4; display: flex; justify-content: space-between; }
+        .error { color: red; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Rust Todo ✅</h1>
+
+    <div id="login-section">
+        <h3>Login</h3>
+        <input type="text" id="username" placeholder="Username" value="Alice">
+        <input type="password" id="password" placeholder="Password" value="passA">
+        <button onclick="login()">Login</button>
+        <p class="error" id="login-error"></p>
+    </div>
+
+    <div id="todo-section" class="hidden">
+        <p>Logged in as <strong id="user-display"></strong> <button onclick="logout()">Logout</button></p>
+        
+        <div style="margin-bottom: 20px;">
+            <input type="text" id="task-input" placeholder="New Task...">
+            <button onclick="createTask()">Add Task</button>
+        </div>
+
+        <ul id="task-list"></ul>
+    </div>
+
+    <script>
+        let token = localStorage.getItem('jwt');
+        let currentUser = localStorage.getItem('user');
+
+        // On Load: Check if already logged in
+        if (token) showApp();
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            const res = await fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await res.json();
+            
+            if (res.ok) {
+                token = data.token;
+                currentUser = username;
+                localStorage.setItem('jwt', token);
+                localStorage.setItem('user', username);
+                document.getElementById('login-error').innerText = "";
+                showApp();
+            } else {
+                document.getElementById('login-error').innerText = data.error || "Login failed";
+            }
+        }
+
+        function logout() {
+            token = null;
+            localStorage.removeItem('jwt');
+            location.reload();
+        }
+
+        function showApp() {
+            document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('todo-section').classList.remove('hidden');
+            document.getElementById('user-display').innerText = currentUser;
+            loadTasks();
+        }
+
+        async function loadTasks() {
+            const res = await fetch('/todos', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            const list = document.getElementById('task-list');
+            list.innerHTML = '';
+
+            data.tasks.forEach(task => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <span>${task.name}</span>
+                    <button onclick="deleteTask(${task.id})">❌</button>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        async function createTask() {
+            const input = document.getElementById('task-input');
+            if (!input.value) return;
+
+            await fetch('/todos', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ name: input.value })
+            });
+            input.value = '';
+            loadTasks();
+        }
+
+        async function deleteTask(id) {
+            await fetch(`/todos/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            loadTasks();
+        }
+    </script>
+</body>
+</html>

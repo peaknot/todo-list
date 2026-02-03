@@ -9,6 +9,7 @@ use axum::{
 };
 use handlers::{create_user, delete_todos, get_todos, post_todos, put_todos};
 use sqlx::sqlite::SqlitePoolOptions;
+use tower_http::services::ServeDir;
 
 #[tokio::main]
 async fn main() {
@@ -59,6 +60,7 @@ async fn main() {
         //.route("/todos", post(post_todos))
         .merge(public_routes)
         .merge(private_routes)
+        .fallback_service(ServeDir::new("assets"))
         .with_state(pool);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();

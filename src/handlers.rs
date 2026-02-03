@@ -52,7 +52,7 @@ pub async fn get_todos(
     State(pool): State<SqlitePool>,
 ) -> impl IntoResponse {
     let user_id = claim.sub.parse::<i64>().unwrap();
-    let data = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE user_id")
+    let data = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE user_id = ?")
         .bind(user_id)
         .fetch_all(&pool)
         .await;
@@ -74,7 +74,7 @@ pub async fn post_todos(
     let user_id = claims.sub.parse::<i64>().unwrap();
 
     let data = sqlx::query(
-        "INSERT INTO tasks (name, completed, in_progress, user_id) VALUES (?, false, false)",
+        "INSERT INTO tasks (name, completed, in_progress, user_id) VALUES (?, false, false, ?)",
     )
     .bind(&payload.name)
     .bind(user_id)
@@ -89,10 +89,11 @@ pub async fn post_todos(
                 Json(serde_json::json!({"msg": "Task created", "id": task_id})),
             )
         }
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create task"})),
-        ),
+        Err(e) => {
+            println!("---> DATABASE ERROR {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to create task"})))
+        },
+
     }
 }
 
