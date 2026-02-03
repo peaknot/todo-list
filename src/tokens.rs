@@ -1,4 +1,4 @@
-use crate::structs::Db;
+use crate::structs::User;
 use argon2::{Argon2, PasswordVerifier};
 use axum::{
     Json,
@@ -7,12 +7,13 @@ use axum::{
         StatusCode,
         header::{AUTHORIZATION, HeaderMap},
     },
-    middleware::{Next},
+    middleware::Next,
     response::IntoResponse,
 };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 pub const JWT_SECRET: &str = "my_super_secret_key_12345";
 
@@ -29,18 +30,30 @@ pub struct LoginPayload {
     pub password: String,
 }
 
-pub async fn login(State(db): State<Db>, Json(payload): Json<LoginPayload>) -> impl IntoResponse {
-    let data = db.lock().expect("Locking failed.");
+pub async fn login(
+    State(pool): State<SqlitePool>,
+    Json(payload): Json<LoginPayload>,
+) -> impl IntoResponse {
+    let data = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = ?")
+        .bind(&payload.username)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            println!("DB Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        });
 
-    let verified_user = match data.users.iter().find(|u| u.username == payload.username) {
-        Some(user) => user,
-        None => {
+    let verified_user = match data {
+        Ok(Some(user)) => user,
+        Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(serde_json::json!({"error": "Invalid credentials"})),
             );
         }
+        Err(code) => return (code, Json(serde_json::json!({"error": "Database error"}))),
     };
+
     let parsed_hash = match argon2::PasswordHash::new(&verified_user.password) {
         Ok(hash) => hash,
         Err(_) => {
@@ -64,7 +77,7 @@ pub async fn login(State(db): State<Db>, Json(payload): Json<LoginPayload>) -> i
     let expiration = issued_at + Duration::hours(1);
 
     let claims = Claims {
-        sub: verified_user.username.clone(),
+        sub: verified_user.id.to_string(),
         exp: expiration.timestamp() as usize,
         iat: issued_at.timestamp() as usize,
     };

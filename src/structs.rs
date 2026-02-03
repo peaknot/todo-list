@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-
-pub type Db = Arc<Mutex<AppState>>;
+use sqlx::FromRow;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateUser {
@@ -9,9 +7,9 @@ pub struct CreateUser {
     pub email: String,
     pub password: String,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, FromRow, Debug, Clone)]
 pub struct User {
-    pub id: usize,
+    pub id: i64,
     pub username: String,
     pub email: String,
     pub password: String,
@@ -26,15 +24,11 @@ pub struct UpdateTodo {
     pub completed: Option<bool>,
     pub in_progress: Option<bool>,
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, FromRow, Debug, Clone)]
 pub struct Task {
-    pub id: usize,
+    pub id: i64,
     pub name: String,
     pub completed: bool,
     pub in_progress: bool,
-}
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AppState {
-    pub users: Vec<User>,
-    pub tasks: Vec<Task>,
+    pub user_id: i64,
 }

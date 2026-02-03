@@ -1,23 +1,23 @@
-use crate::structs::{CreateTask, CreateUser, Db, Task, UpdateTodo, User};
+use crate::{
+    structs::{CreateTask, CreateUser, Task, UpdateTodo},
+    tokens::Claims,
+};
 use argon2::{
     Argon2,
     password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
 };
+use sqlx::SqlitePool;
 
 pub async fn create_user(
-    State(db): State<Db>,
+    State(pool): State<SqlitePool>,
     Json(payload): Json<CreateUser>,
 ) -> impl IntoResponse {
-    let mut data = db.lock().unwrap();
-
-    let new_id = data.users.iter().map(|x| x.id + 1).max().unwrap_or(1);
-
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
@@ -26,95 +26,137 @@ pub async fn create_user(
         .expect("Password hashing failed")
         .to_string();
 
-    let new_user = User {
-        id: new_id,
-        username: payload.username,
-        email: payload.email,
-        password: password_hash,
-    };
-    data.users.push(new_user);
-
-    (
-        StatusCode::CREATED,
-        Json(serde_json::json!({"msg": "User created", "id": new_id})),
-    )
+    let data = sqlx::query("INSERT INTO users (username, email, password) VALUES (?, ?, ?)")
+        .bind(&payload.username)
+        .bind(&payload.email)
+        .bind(&password_hash)
+        .execute(&pool)
+        .await;
+    match data {
+        Ok(result) => {
+            let user_id = result.last_insert_rowid();
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({"msg": "User created", "id": user_id})),
+            )
+        }
+        Err(_) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "Username already exists"})),
+        ),
+    }
 }
 
-pub async fn get_todos(State(db): State<Db>) -> impl IntoResponse {
-    let data = db.lock().expect("Locking failed.");
+pub async fn get_todos(
+    Extension(claim): Extension<Claims>,
+    State(pool): State<SqlitePool>,
+) -> impl IntoResponse {
+    let user_id = claim.sub.parse::<i64>().unwrap();
+    let data = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE user_id")
+        .bind(user_id)
+        .fetch_all(&pool)
+        .await;
 
-    Json(serde_json::json!({ "tasks": &data.tasks}))
+    match data {
+        Ok(tasks) => (StatusCode::OK, Json(serde_json::json!({ "tasks": tasks }))),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch tasks"})),
+        ),
+    }
 }
 
 pub async fn post_todos(
-    State(db): State<Db>,
+    Extension(claims): Extension<Claims>,
+    State(pool): State<SqlitePool>,
     Json(payload): Json<CreateTask>,
 ) -> impl IntoResponse {
-    let mut data = db.lock().expect("Locking failed.");
+    let user_id = claims.sub.parse::<i64>().unwrap();
 
-    let task_id = data.tasks.iter().map(|n| n.id + 1).max().unwrap_or(1);
-
-    let new_task = Task {
-        id: task_id,
-        name: payload.name,
-        completed: false,
-        in_progress: false,
-    };
-    data.tasks.push(new_task);
-    (
-        StatusCode::CREATED,
-        Json(serde_json::json!({"msg": "Task created", "id": task_id})),
+    let data = sqlx::query(
+        "INSERT INTO tasks (name, completed, in_progress, user_id) VALUES (?, false, false)",
     )
+    .bind(&payload.name)
+    .bind(user_id)
+    .execute(&pool)
+    .await;
+
+    match data {
+        Ok(task) => {
+            let task_id = task.last_insert_rowid();
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({"msg": "Task created", "id": task_id})),
+            )
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create task"})),
+        ),
+    }
 }
 
 pub async fn put_todos(
-    Path(id): Path<usize>,
-    State(db): State<Db>,
+    Path(id): Path<i64>,
+    State(pool): State<SqlitePool>,
     Json(input): Json<UpdateTodo>,
 ) -> impl IntoResponse {
-    let mut data = db.lock().expect("Locking failed.");
+    let query = "UPDATE tasks SET
+        name = COALESCE(?, name),
+        completed = COALESCE(?, completed),
+        in_progress = COALESCE(?, in_progress)
+        WHERE id = ?
+        RETURNING id, name, completed, in_progress";
 
-    if let Some(task) = data.tasks.iter_mut().find(|t| t.id == id) {
-        if let Some(new_name) = input.name {
-            task.name = new_name;
-        }
-        if let Some(is_completed) = input.completed {
-            task.completed = is_completed;
-            if is_completed {
-                task.in_progress = false;
-            }
-        }
-        if let Some(is_in_progress) = input.in_progress {
-            task.in_progress = is_in_progress;
-            if is_in_progress {
-                task.completed = false;
-            }
-        }
+    let data = sqlx::query_as::<_, Task>(query)
+        .bind(input.name)
+        .bind(input.completed)
+        .bind(input.in_progress)
+        .bind(id)
+        .fetch_optional(&pool)
+        .await;
 
-        return (
+    match data {
+        Ok(Some(task)) => (
             StatusCode::OK,
             Json(serde_json::json!({"msg": "Task updated", "task": task})),
-        );
+        ),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"msg": "Task not found"})),
+        ),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Update failed"})),
+        ),
     }
-
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"msg": "Task not found"})),
-    )
 }
 
-pub async fn delete_todos(Path(id): Path<usize>, State(db): State<Db>) -> impl IntoResponse {
-    let mut data = db.lock().expect("Locking failed.");
+pub async fn delete_todos(
+    Path(id): Path<i64>,
+    State(pool): State<SqlitePool>,
+) -> impl IntoResponse {
+    let query = "DELETE FROM tasks WHERE id = ?";
 
-    if let Some(pos) = data.tasks.iter().position(|t| t.id == id) {
-        let removed_task = data.tasks.remove(pos);
-        return (
-            StatusCode::OK,
-            Json(serde_json::json!({"msg": "Task deleted", "task": removed_task})),
-        );
+    let data = sqlx::query(query).bind(id).execute(&pool).await;
+
+    match data {
+        Ok(res) => {
+            if res.rows_affected() > 0 {
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!({"msg": "Task deleted"})),
+                )
+            } else {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"msg": "Task not found"})),
+                )
+            }
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Delete failed"})),
+        ),
     }
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"msg": "Task not found"})),
-    )
 }
