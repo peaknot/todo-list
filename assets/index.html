@@ -11,17 +11,31 @@
         button { padding: 8px 16px; cursor: pointer; }
         li { margin: 10px 0; padding: 10px; background: #f4f4f4; display: flex; justify-content: space-between; }
         .error { color: red; margin-top: 10px; }
+        .actions { display: flex; gap: 5px; }
+        .completed span { text-decoration: line-through; color: gray; }
+        .inprogress { border-left: 5px solid #ffc107; }
     </style>
 </head>
 <body>
-    <h1>Rust Todo ✅</h1>
+    <h1>Task Tracker</h1>
 
     <div id="login-section">
         <h3>Login</h3>
-        <input type="text" id="username" placeholder="Username" value="Alice">
-        <input type="password" id="password" placeholder="Password" value="passA">
+        <input type="text" id="login-username" placeholder="Username" value="Alice">
+        <input type="password" id="login-password" placeholder="Password" value="passA">
         <button onclick="login()">Login</button>
         <p class="error" id="login-error"></p>
+        <p>Need an account? <a href="#" onclick="showRegister()">Register</a></p>
+    </div>
+
+    <div id="register-section" class="hidden">
+        <h3>Register</h3>
+        <input type="text" id="reg-username" placeholder="Username">
+        <input type="email" id="reg-email" placeholder="Email">
+        <input type="password" id="reg-password" placeholder="Password">
+        <button onclick="register()">Register</button>
+        <p class="error" id="register-error"></p>
+        <p>Have an account? <a href="#" onclick="showLogin()">Login</a></p>
     </div>
 
     <div id="todo-section" class="hidden">
@@ -43,8 +57,8 @@
         if (token) showApp();
 
         async function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
 
             const res = await fetch('/login', {
                 method: 'POST',
@@ -72,8 +86,39 @@
             location.reload();
         }
 
+        function showRegister() {
+            document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('register-section').classList.remove('hidden');
+        }
+
+        function showLogin() {
+            document.getElementById('register-section').classList.add('hidden');
+            document.getElementById('login-section').classList.remove('hidden');
+        }
+
+        async function register() {
+            const username = document.getElementById('reg-username').value;
+            const email = document.getElementById('reg-email').value;
+            const password = document.getElementById('reg-password').value;
+
+            const res = await fetch('/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                alert("Registration successful! Please login.");
+                showLogin();
+            } else {
+                document.getElementById('register-error').innerText = data.error || "Registration failed";
+            }
+        }
+
         function showApp() {
             document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('register-section').classList.add('hidden');
             document.getElementById('todo-section').classList.remove('hidden');
             document.getElementById('user-display').innerText = currentUser;
             loadTasks();
@@ -89,9 +134,17 @@
 
             data.tasks.forEach(task => {
                 const li = document.createElement('li');
+                if (task.completed) li.classList.add('completed');
+                else if (task.in_progress) li.classList.add('inprogress');
+
                 li.innerHTML = `
                     <span>${task.name}</span>
-                    <button onclick="deleteTask(${task.id})">❌</button>
+                    <div class="actions">
+                        <button onclick="updateStatus(${task.id}, 'todo')" title="To Do">📝</button>
+                        <button onclick="updateStatus(${task.id}, 'inprogress')" title="In Progress">⏳</button>
+                        <button onclick="updateStatus(${task.id}, 'completed')" title="Done">✅</button>
+                        <button onclick="deleteTask(${task.id})">❌</button>
+                    </div>
                 `;
                 list.appendChild(li);
             });
@@ -110,6 +163,24 @@
                 body: JSON.stringify({ name: input.value })
             });
             input.value = '';
+            loadTasks();
+        }
+
+        async function updateStatus(id, status) {
+            const updates = {
+                todo: { completed: false, in_progress: false },
+                inprogress: { completed: false, in_progress: true },
+                completed: { completed: true, in_progress: false }
+            };
+
+            await fetch(`/todos/${id}`, {
+                method: 'PATCH',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(updates[status])
+            });
             loadTasks();
         }
 
