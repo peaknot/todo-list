@@ -34,6 +34,8 @@ pub async fn login(
     State(pool): State<SqlitePool>,
     Json(payload): Json<LoginPayload>,
 ) -> impl IntoResponse {
+
+        // make query request for username in the DB
     let data = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = ?")
         .bind(&payload.username)
         .fetch_optional(&pool)
@@ -43,7 +45,9 @@ pub async fn login(
             StatusCode::INTERNAL_SERVER_ERROR
         });
 
+        // verify query result
     let verified_user = match data {
+        // if username is in the DB return the user
         Ok(Some(user)) => user,
         Ok(None) => {
             return (
@@ -53,7 +57,7 @@ pub async fn login(
         }
         Err(code) => return (code, Json(serde_json::json!({"error": "Database error"}))),
     };
-
+        // if user is verified, hash the the users password and return the hashed password
     let parsed_hash = match argon2::PasswordHash::new(&verified_user.password) {
         Ok(hash) => hash,
         Err(_) => {
@@ -63,7 +67,8 @@ pub async fn login(
             );
         }
     };
-
+        // verify the hashed password from the user password request from DB
+        // if does not match return error
     if Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .is_err()
@@ -103,6 +108,7 @@ pub async fn authorize(
     mut request: Request,
     next: Next,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+        
     let auth_header = headers
         .get(AUTHORIZATION)
         .ok_or((
